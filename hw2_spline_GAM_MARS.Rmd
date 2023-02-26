@@ -1,0 +1,26 @@
+---
+title: "hw2_spline_GAM_MARS"
+author: "Cary Ni"
+date: "2023-02-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library(tidyverse)
+library(caret)
+library(mgcv)
+```
+
+```{r}
+# load dataset
+college_df = read_csv("College.csv") %>% 
+  janitor::clean_names() %>% 
+  na.omit()
+
+# data partition
+index_train = createDataPartition(y = college_df$outstate, p = 0.8, list = FALSE)
+train_set = college_df[index_train, ]
+test_set = college_df[-index_train, ]
+```
+
