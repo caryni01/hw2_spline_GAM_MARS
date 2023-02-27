@@ -10,6 +10,15 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 library(tidyverse)
 library(caret)
 library(mgcv)
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
 ```
 
 ```{r}
@@ -22,5 +31,54 @@ college_df = read_csv("College.csv") %>%
 index_train = createDataPartition(y = college_df$outstate, p = 0.8, list = FALSE)
 train_set = college_df[index_train, ]
 test_set = college_df[-index_train, ]
+```
+
+# Create feature plot to examine the relationship between predictors and response variable
+
+```{r}
+pred_x = model.matrix(outstate~.-college, data = train_set)[, -1]
+resp_y = train_set %>% pull(outstate)
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col = rgb(.2, .2, .2, .5)
+theme1$plot.symbol$pch = 16
+theme1$plot.line$col = rgb(.8, .1, .1, 1)
+theme1$plot.line$lwd <- 2
+trellis.par.set(theme1)
+featurePlot(x = pred_x, 
+            y = resp_y, 
+            plot = "scatter", 
+            layout = c(4, 4))
+```
+
+It can be seen from the plots that `s_f_ratio`, `grad_rate`, and `room_board` are most likely to be linearly correlated with the response variable `outstate` while the linear relationship is not appearent for the rest of the predictors. 
+
+# Fit smoothing spline models
+
+```{r}
+terminal_grid = seq(20, 100, by = 1)
+# fit smoothing spline models with pre-specified df
+
+# fit smoothing spline model with generalized cross-validation
+ss_model = smooth.spline(train_set$terminal, train_set$outstate, cv = FALSE)
+# show the resulting degree of freedom from gcv
+ss_model$df
+# draw the line with df from gcv
+pred_gcv = predict(object = ss_model, x=terminal_grid)
+post_gcv = data.frame(terminal=pred_gcv$x, outstate=pred_gcv$y, df = ss_model$df)
+# fit the models with different df
+model_list = list()
+pred = list()
+post = list()
+for (i in 1:10) {
+  model_list[[i]] = smooth.spline(train_set$terminal, train_set$outstate, df = 2*i)
+  pred[i] = predict(object = tmp_list[i], x=terminal_grid)
+  post[[i]] = data.frame(terminal=pred[[i]]$x, outstate=pred[[i]]$y, df = 2*i)
+}
+# combine the data from models 
+combine_df = as_tibble_col(post) %>% unnest(value)
+# show the training set data points
+p = ggplot(data = train_set, aes(x = terminal, y = outstate)) + geom_point(color= rgb(.2, .4, .2, .5))
+# show the smoothing splines with different df, the red one is obtained from gcv
+p + geom_line(aes(x = terminal, y = outstate, group = df, color = df), data = combine_df) + geom_line(aes(x = terminal, y = outstate), color = 'red', data = post_gcv)
 ```
 
