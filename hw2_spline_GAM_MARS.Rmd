@@ -24,11 +24,12 @@ theme_set(theme_minimal() + theme(legend.position = "bottom"))
 
 ```{r}
 # load dataset
-college_df = read_csv("College.csv") %>% 
+college_df = read_csv("College.csv", show_col_types = FALSE) %>% 
   janitor::clean_names() %>% 
   na.omit()
 
 # data partition
+set.seed(2023)
 index_train = createDataPartition(y = college_df$outstate, p = 0.8, list = FALSE)
 train_set = college_df[index_train, ]
 test_set = college_df[-index_train, ]
@@ -60,7 +61,7 @@ featurePlot(x = pred_x,
             layout = c(4, 4))
 ```
 
-It can be seen from the plots that `s_f_ratio`, `grad_rate`, and `room_board` are most likely to be linearly correlated with the response variable `outstate` while the linear relationship is not apparent for the rest of the predictors. 
+It can be seen from the plots that `s_f_ratio`, `per_alumni`, `grad_rate`, and `room_board` are most likely to be linearly correlated with the response variable `outstate` while the linear relationship is not apparent for the rest of the predictors. 
 
 ## Fit smoothing spline models
 
@@ -105,8 +106,8 @@ tune_Grid = data.frame(method = "GCV.Cp", select = c(TRUE, FALSE))
 gam_model = train(pred_x, resp_y, 
                    method = "gam",
                    trControl = ctrl_1)
-summary(gam_model)
 gam_model$bestTune
+summary(gam_model$finalModel)
 ```
 
 ```{r}
@@ -117,7 +118,7 @@ plot(gam_model$finalModel, shade = TRUE)
 get_test_mse(gam_model, test_x, test_y)
 ```
 
-(b) As shown in the plot and the summary of the generalized additive model, while all of the predictors are included,  `terminal`, `personal`, `p_undergrad`, `enroll`, `accept` are the predictors with the effective degree of freedom of 1, suggesting an linear correlation between those covariates and the response variable. `top10perc`, `f_undergrad`, and `expend` are the variables with largest effective degree of freedom which are over 6, indicating greatest flexibility in fitting smoothing splines. The test MSE is 3.51e6. 
+(b) As shown in the plot and the summary of the generalized additive model, while all of the predictors are included,  `top25perc`, `personal`, `p_undergrad`, `enroll`, `accept`, and `apps`are the predictors with the effective degree of freedom of 1, suggesting an linear correlation between those covariates and the response variable. `ph_d`, `f_undergrad`, and `expend` are the variables with largest effective degree of freedom which are over 5, indicating greatest flexibility in fitting smoothing splines. The test MSE is 1.92e6. 
 
 ## Fit multivariate adaptive regression spline model (MARS)
 
@@ -134,9 +135,9 @@ mars_model = train(pred_x, resp_y,
 plot(mars_model)
 mars_model$bestTune
 # Report the final model
-summary(mars_model)
-# Build partial dependence plot for apps and f_undergrad & grad_rate
-p1 = pdp::partial(mars_model, pred.var = c("apps"), 
+summary(mars_model$finalModel)
+# Build partial dependence plot for expend and f_undergrad & grad_rate
+p1 = pdp::partial(mars_model, pred.var = c("expend"), 
                   grid.resolution = 10) %>% autoplot()
 p2 = pdp::partial(mars_model, pred.var = c("f_undergrad", "grad_rate"), 
                   grid.resolution = 10) %>% pdp::plotPartial(
@@ -147,7 +148,7 @@ gridExtra::grid.arrange(p1, p2, ncol = 2)
 get_test_mse(mars_model, test_x, test_y)
 ```
 
-(c) The plot of model selection shows that the final multivariate adaptive regression spline model uses 9 of the 16 original predictors with degree of 1 and 15 of 22 terms in total including the intercept. In the example partial dependence plots above, a single knot at 6348 can be found in `apps`, a knot at 1417 for `f_undergrad` and 88 for `grad_rate` can be seen in the three dimension plot on the right. The reported test MSE is 3.51e6. 
+(c) The plot of model selection shows that the final multivariate adaptive regression spline model uses 10 of the 16 original predictors with degree of 1 and 15 of 22 terms in total including the intercept. In the example partial dependence plots above, two knots at 6889 and 14980 can be found in `expend`, a knot at 1405 for `f_undergrad` and 98 for `grad_rate` can be seen in the three dimension plot on the right. The reported test MSE is 1.87e6. 
 
 ```{r}
 # model comparison to MLR model (without regularization)
@@ -165,7 +166,7 @@ resamp = resamples(list(
 bwplot(resamp, metric = "RMSE")
 ```
 
-It can be seem that the multivariate adaptive regression spline (MARS) model has much lower cross-validation error than multiple linear regression (MLR) model from the boxplot above. In addition, MARS model also has fewer predictors estimated than MLR model (without regularization). Therefore, MARS model is more favored in predicting out-of-state tuition in this case study. 
+(d) It can be seem that the multivariate adaptive regression spline (MARS) model has much lower cross-validation error than multiple linear regression (MLR) model from the boxplot above. In addition, MARS model also has fewer predictors estimated than MLR model (without regularization). Therefore, MARS model is more favored in predicting out-of-state tuition in this case study. For general application focusing on predictability instead of interpretability, MARS could not only capture the linear relationship between predictors and response variable as linear model when degree is one, but also capture the nonlinear pattern with degree larger than one. Thus, MARS is more favorable than linear model in terms of predictability in general context though linear model may be more informative because of its better interpretability. 
 
 
 
