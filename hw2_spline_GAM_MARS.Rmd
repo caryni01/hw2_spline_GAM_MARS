@@ -150,6 +150,8 @@ get_test_mse(mars_model, test_x, test_y)
 
 (c) The plot of model selection shows that the final multivariate adaptive regression spline model uses 10 of the 16 original predictors with degree of 1 and 15 of 22 terms in total including the intercept. In the example partial dependence plots above, two knots at 6889 and 14980 can be found in `expend`, a knot at 1405 for `f_undergrad` and 98 for `grad_rate` can be seen in the three dimension plot on the right. The reported test MSE is 1.87e6. 
 
+## Compare MARS model to a linear model(without regularization)
+
 ```{r}
 # model comparison to MLR model (without regularization)
 set.seed(1)
