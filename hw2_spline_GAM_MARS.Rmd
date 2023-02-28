@@ -10,6 +10,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
 library(tidyverse)
 library(caret)
 library(mgcv)
+library(earth)
 options(
   ggplot2.continuous.colour = "viridis",
   ggplot2.continuous.fill = "viridis"
@@ -31,13 +32,22 @@ college_df = read_csv("College.csv") %>%
 index_train = createDataPartition(y = college_df$outstate, p = 0.8, list = FALSE)
 train_set = college_df[index_train, ]
 test_set = college_df[-index_train, ]
+pred_x = model.matrix(outstate~.-college, data = train_set)[, -1]
+resp_y = train_set %>% pull(outstate)
+test_x = model.matrix(outstate~.-college, data = test_set)[, -1]
+test_y = test_set %>% pull(outstate)
+
+# create a quick function to calculate test mse
+get_test_mse = function(input_model, x_test, y_test) {
+  predict_value = predict(input_model, newdata = x_test)
+  test_mse = mean((predict_value - y_test)^2)
+  return(test_mse)
+}
 ```
 
 # Create feature plot to examine the relationship between predictors and response variable
 
 ```{r}
-pred_x = model.matrix(outstate~.-college, data = train_set)[, -1]
-resp_y = train_set %>% pull(outstate)
 theme1 <- trellis.par.get()
 theme1$plot.symbol$col = rgb(.2, .2, .2, .5)
 theme1$plot.symbol$pch = 16
@@ -50,12 +60,12 @@ featurePlot(x = pred_x,
             layout = c(4, 4))
 ```
 
-It can be seen from the plots that `s_f_ratio`, `grad_rate`, and `room_board` are most likely to be linearly correlated with the response variable `outstate` while the linear relationship is not appearent for the rest of the predictors. 
+It can be seen from the plots that `s_f_ratio`, `grad_rate`, and `room_board` are most likely to be linearly correlated with the response variable `outstate` while the linear relationship is not apparent for the rest of the predictors. 
 
-# Fit smoothing spline models
+## Fit smoothing spline models
 
 ```{r}
-terminal_grid = seq(20, 100, by = 1)
+terminal_grid = seq(20, 105, by = 1)
 # fit smoothing spline models with pre-specified df
 
 # fit smoothing spline model with generalized cross-validation
@@ -71,7 +81,7 @@ pred = list()
 post = list()
 for (i in 1:10) {
   model_list[[i]] = smooth.spline(train_set$terminal, train_set$outstate, df = 2*i)
-  pred[i] = predict(object = tmp_list[i], x=terminal_grid)
+  pred[[i]] = predict(object = model_list[[i]], x=terminal_grid)
   post[[i]] = data.frame(terminal=pred[[i]]$x, outstate=pred[[i]]$y, df = 2*i)
 }
 # combine the data from models 
@@ -81,4 +91,83 @@ p = ggplot(data = train_set, aes(x = terminal, y = outstate)) + geom_point(color
 # show the smoothing splines with different df, the red one is obtained from gcv
 p + geom_line(aes(x = terminal, y = outstate, group = df, color = df), data = combine_df) + geom_line(aes(x = terminal, y = outstate), color = 'red', data = post_gcv)
 ```
+
+(a) The plot with resulting fits with different degree of freedom shows that the smoothing spline model with small degree of freedom is more rigid and close to linear regression. As the degree of freedom increases, the smoothing spline model becomes more flexible with wiggling line that fits more observations. The model obtained from generalized cross-validation is marked red in the plot with a degree of freedom `r ss_model$df`. 
+
+## Fit Generalized Additive Models GAM
+
+```{r cache=TRUE}
+# set train method
+ctrl_1 = trainControl(method = "cv", number = 10)
+# fit gam model with all predictors
+set.seed(1)
+tune_Grid = data.frame(method = "GCV.Cp", select = c(TRUE, FALSE))
+gam_model = train(pred_x, resp_y, 
+                   method = "gam",
+                   trControl = ctrl_1)
+summary(gam_model)
+gam_model$bestTune
+```
+
+```{r}
+# plot.gam for each of the predictors
+par(mfrow = c(2, 2))
+plot(gam_model$finalModel, shade = TRUE)
+# get test mse for gam model
+get_test_mse(gam_model, test_x, test_y)
+```
+
+(b) As shown in the plot and the summary of the generalized additive model, while all of the predictors are included,  `terminal`, `personal`, `p_undergrad`, `enroll`, `accept` are the predictors with the effective degree of freedom of 1, suggesting an linear correlation between those covariates and the response variable. `top10perc`, `f_undergrad`, and `expend` are the variables with largest effective degree of freedom which are over 6, indicating greatest flexibility in fitting smoothing splines. The test MSE is 3.51e6. 
+
+## Fit multivariate adaptive regression spline model (MARS)
+
+```{r}
+set.seed(1)
+# Set tuning parameters
+mars_grid = expand.grid(degree = 1:3, nprune = 2:20)
+# Fit MARS model
+mars_model = train(pred_x, resp_y, 
+                   method = "earth",
+                   tuneGrid = mars_grid,
+                   trControl = ctrl_1)
+# Plot the model
+plot(mars_model)
+mars_model$bestTune
+# Report the final model
+summary(mars_model)
+# Build partial dependence plot for apps and f_undergrad & grad_rate
+p1 = pdp::partial(mars_model, pred.var = c("apps"), 
+                  grid.resolution = 10) %>% autoplot()
+p2 = pdp::partial(mars_model, pred.var = c("f_undergrad", "grad_rate"), 
+                  grid.resolution = 10) %>% pdp::plotPartial(
+                    levelplot = FALSE, zlab = "yhat", drape = TRUE, 
+                    screen = list(z = 20, x = -60))
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+# get test mse for mars model
+get_test_mse(mars_model, test_x, test_y)
+```
+
+(c) The plot of model selection shows that the final multivariate adaptive regression spline model uses 9 of the 16 original predictors with degree of 1 and 15 of 22 terms in total including the intercept. In the example partial dependence plots above, a single knot at 6348 can be found in `apps`, a knot at 1417 for `f_undergrad` and 88 for `grad_rate` can be seen in the three dimension plot on the right. The reported test MSE is 3.51e6. 
+
+```{r}
+# model comparison to MLR model (without regularization)
+set.seed(1)
+lm_model = train(pred_x, resp_y,
+                 method = "lm",
+                 trControl = ctrl_1)
+summary(lm_model)
+# compare model performance through sampling method
+resamp = resamples(list(
+  mars = mars_model,
+  mlr = lm_model
+))
+# plot resampling rmse
+bwplot(resamp, metric = "RMSE")
+```
+
+It can be seem that the multivariate adaptive regression spline (MARS) model has much lower cross-validation error than multiple linear regression (MLR) model from the boxplot above. In addition, MARS model also has fewer predictors estimated than MLR model (without regularization). Therefore, MARS model is more favored in predicting out-of-state tuition in this case study. 
+
+
+
+
 
